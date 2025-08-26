@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Complete Hex Color Canvas</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: #1a1a1a;
+        color: white;
+        overflow-x: hidden;
+      }
+
+      .header {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        background: rgba(26, 26, 26, 0.95);
+        backdrop-filter: blur(10px);
+        padding: 15px 20px;
+        z-index: 1000;
+      }
+
+      .header h1 {
+        font-size: 24px;
+        margin-bottom: 5px;
+      }
+
+      .info {
+        font-size: 14px;
+        opacity: 0.7;
+      }
+
+      .controls {
+        display: flex;
+        gap: 10px;
+        margin-top: 10px;
+        align-items: center;
+      }
+
+      .control-group {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+
+      label {
+        font-size: 12px;
+        opacity: 0.8;
+      }
+
+      input[type="range"] {
+        width: 80px;
+      }
+
+      .color-canvas {
+        margin-top: 123px;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+        gap: 4px;
+        padding: 20px;
+        min-height: 100vh;
+      }
+
+      .color-card {
+        aspect-ratio: 1;
+        border-radius: 8px;
+        cursor: pointer;
+        position: relative;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        border: 2px solid transparent;
+        will-change: transform;
+        contain: layout style paint;
+      }
+
+      .color-card:hover {
+        transform: scale(1.05);
+        box-shadow: 0 8px 25px rgba(255, 255, 255, 0.1);
+        border-color: rgba(255, 255, 255, 0.3);
+      }
+
+      .color-info {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 4px 8px;
+        font-size: 11px;
+        font-weight: 500;
+        border-radius: 0 0 6px 6px;
+        opacity: 0;
+        transition: opacity 0.2s ease;
+      }
+
+      .color-card:hover .color-info {
+        opacity: 1;
+      }
+
+      .toast {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%) scale(0);
+        background: rgba(0, 0, 0, 0.9);
+        color: white;
+        padding: 15px 25px;
+        border-radius: 25px;
+        font-size: 14px;
+        z-index: 2000;
+        transition: transform 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+      }
+
+      .toast.show {
+        transform: translate(-50%, -50%) scale(1);
+      }
+
+      .loading {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
+        padding: 10px 15px;
+        border-radius: 20px;
+        font-size: 12px;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+      }
+
+      .loading.show {
+        opacity: 1;
+      }
+
+      .progress-container {
+        position: fixed;
+        top: 115px;
+        left: 0;
+        right: 0;
+        height: 8px;
+        background: #1a1a1a;
+        z-index: 999;
+        display: flex;
+        align-items: center;
+        padding: 2px 0;
+      }
+
+      .progress-bar {
+        height: 3px;
+        background: linear-gradient(
+          90deg,
+          #ff006e,
+          #fb5607,
+          #ffbe0b,
+          #8338ec,
+          #3a86ff
+        );
+        transition: width 0.3s ease;
+        width: 0%;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="header">
+      <h1>Complete Hex Color Canvas</h1>
+      <div class="info">16.7M Colors • Click any card to copy hex code</div>
+      <div class="controls">
+        <div class="control-group">
+          <label>Step:</label>
+          <input
+            type="range"
+            id="stepSize"
+            min="1"
+            max="16"
+            value="4"
+            title="Color sampling precision - lower values = more colors, higher values = fewer colors"
+          />
+          <span id="stepValue">4</span>
+        </div>
+        <div class="control-group">
+          <label>Batch:</label>
+          <input
+            type="range"
+            id="batchSize"
+            min="100"
+            max="2000"
+            value="500"
+            step="100"
+            title="How many colors load at once - higher values = fewer loading cycles"
+          />
+          <span id="batchValue">500</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="progress-container">
+      <div class="progress-bar" id="progressBar"></div>
+    </div>
+    <div class="color-canvas" id="colorCanvas"></div>
+    <div class="loading" id="loading">Loading colors...</div>
+    <div class="toast" id="toast"></div>
+
+    <script>
+      class ColorCanvas {
+        constructor() {
+          this.canvas = document.getElementById("colorCanvas");
+          this.loading = document.getElementById("loading");
+          this.toast = document.getElementById("toast");
+          this.progressBar = document.getElementById("progressBar");
+
+          this.stepSize = parseInt(document.getElementById("stepSize").value);
+          this.batchSize = parseInt(document.getElementById("batchSize").value);
+          this.currentIndex = 0;
+          this.totalColors = Math.pow(256 / this.stepSize, 3);
+          this.isLoading = false;
+
+          this.setupControls();
+          this.setupIntersectionObserver();
+          this.generateInitialBatch();
+
+          window.addEventListener(
+            "scroll",
+            this.throttle(this.checkScroll.bind(this), 100)
+          );
+        }
+
+        setupControls() {
+          const stepSlider = document.getElementById("stepSize");
+          const batchSlider = document.getElementById("batchSize");
+          const stepValue = document.getElementById("stepValue");
+          const batchValue = document.getElementById("batchValue");
+
+          stepSlider.addEventListener("input", (e) => {
+            this.stepSize = parseInt(e.target.value);
+            stepValue.textContent = this.stepSize;
+            this.reset();
+          });
+
+          batchSlider.addEventListener("input", (e) => {
+            this.batchSize = parseInt(e.target.value);
+            batchValue.textContent = this.batchSize;
+          });
+        }
+
+        reset() {
+          this.canvas.innerHTML = "";
+          this.currentIndex = 0;
+          this.totalColors = Math.pow(256 / this.stepSize, 3);
+          this.progressBar.style.width = "0%";
+          this.generateInitialBatch();
+        }
+
+        setupIntersectionObserver() {
+          this.observer = new IntersectionObserver(
+            (entries) => {
+              entries.forEach((entry) => {
+                if (
+                  entry.isIntersecting &&
+                  entry.target.classList.contains("load-trigger")
+                ) {
+                  this.loadMoreColors();
+                }
+              });
+            },
+            { threshold: 0.1 }
+          );
+        }
+
+        generateInitialBatch() {
+          this.updateProgress();
+          this.generateColorBatch();
+          this.addLoadTrigger();
+        }
+
+        generateColorBatch() {
+          if (this.isLoading || this.currentIndex >= this.totalColors) return;
+
+          this.isLoading = true;
+          this.showLoading();
+
+          const fragment = document.createDocumentFragment();
+          const endIndex = Math.min(
+            this.currentIndex + this.batchSize,
+            this.totalColors
+          );
+
+          const colors = [];
+          for (let i = this.currentIndex; i < endIndex; i++) {
+            colors.push(this.indexToColor(i));
+          }
+
+          colors.forEach((color) => {
+            const card = this.createColorCard(color);
+            fragment.appendChild(card);
+          });
+
+          const oldTrigger = document.querySelector(".load-trigger");
+          if (oldTrigger) oldTrigger.remove();
+
+          this.canvas.appendChild(fragment);
+          this.currentIndex = endIndex;
+
+          requestAnimationFrame(() => {
+            this.updateProgress();
+            this.hideLoading();
+
+            if (this.currentIndex < this.totalColors) {
+              this.addLoadTrigger();
+            }
+          });
+
+          this.isLoading = false;
+        }
+
+        indexToColor(index) {
+          const step = this.stepSize;
+          const range = 256 / step;
+
+          const r = Math.floor(index / (range * range)) * step;
+          const g = Math.floor((index % (range * range)) / range) * step;
+          const b = (index % range) * step;
+
+          const clampedR = Math.min(r, 255);
+          const clampedG = Math.min(g, 255);
+          const clampedB = Math.min(b, 255);
+
+          const hex = `#${clampedR.toString(16).padStart(2, "0")}${clampedG
+            .toString(16)
+            .padStart(2, "0")}${clampedB.toString(16).padStart(2, "0")}`;
+
+          return {
+            r: clampedR,
+            g: clampedG,
+            b: clampedB,
+            hex,
+          };
+        }
+
+        createColorCard(color) {
+          const card = document.createElement("div");
+          card.className = "color-card";
+          card.style.backgroundColor = color.hex;
+
+          const info = document.createElement("div");
+          info.className = "color-info";
+          info.textContent = color.hex.toUpperCase();
+
+          card.appendChild(info);
+
+          card.addEventListener("click", () => {
+            this.copyToClipboard(color.hex);
+          });
+
+          return card;
+        }
+
+        addLoadTrigger() {
+          if (this.currentIndex < this.totalColors) {
+            const trigger = document.createElement("div");
+            trigger.className = "load-trigger";
+            trigger.style.height = "1px";
+            trigger.style.gridColumn = "1 / -1";
+            this.canvas.appendChild(trigger);
+            this.observer.observe(trigger);
+          }
+        }
+
+        loadMoreColors() {
+          if (!this.isLoading) {
+            this.generateColorBatch();
+          }
+        }
+
+        checkScroll() {
+          const scrollHeight = document.documentElement.scrollHeight;
+          const scrollTop = window.scrollY;
+          const clientHeight = window.innerHeight;
+
+          if (scrollTop + clientHeight >= scrollHeight - 500) {
+            this.loadMoreColors();
+          }
+        }
+
+        updateProgress() {
+          const progress = (this.currentIndex / this.totalColors) * 100;
+          this.progressBar.style.width = `${progress}%`;
+        }
+
+        showLoading() {
+          this.loading.classList.add("show");
+        }
+
+        hideLoading() {
+          this.loading.classList.remove("show");
+        }
+
+        async copyToClipboard(text) {
+          try {
+            await navigator.clipboard.writeText(text);
+            this.showToast(`Copied ${text.toUpperCase()}`);
+          } catch (err) {
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            document.body.appendChild(textArea);
+            textArea.select();
+            document.execCommand("copy");
+            document.body.removeChild(textArea);
+            this.showToast(`Copied ${text.toUpperCase()}`);
+          }
+        }
+
+        showToast(message) {
+          this.toast.textContent = message;
+          this.toast.classList.add("show");
+
+          setTimeout(() => {
+            this.toast.classList.remove("show");
+          }, 2000);
+        }
+
+        throttle(func, limit) {
+          let inThrottle;
+          return function () {
+            if (!inThrottle) {
+              func.apply(this, arguments);
+              inThrottle = true;
+              setTimeout(() => (inThrottle = false), limit);
+            }
+          };
+        }
+      }
+
+      document.addEventListener("DOMContentLoaded", () => {
+        new ColorCanvas();
+      });
+    </script>
+  </body>
+</html>
